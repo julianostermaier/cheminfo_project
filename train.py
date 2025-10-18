@@ -8,7 +8,8 @@ from sklearn.inspection import permutation_importance
 
 def train_eval_model(model, X_train, y_train, X_test, y_test,
                      feature_selection=True,
-                     feature_importance=True):
+                     feature_importance=True,
+                     NJOBS=-1):
     """
     Train and evaluate a classification model.
 
@@ -17,7 +18,7 @@ def train_eval_model(model, X_train, y_train, X_test, y_test,
     # fit using sequential feature selector
     # default: 5 fold cross-validation
     if feature_selection:
-        sfs = SequentialFeatureSelector(model, n_jobs=-1, tol=0.08, direction='backward', scoring='roc_auc')
+        sfs = SequentialFeatureSelector(model, n_jobs=NJOBS, tol=0.08, direction='backward', scoring='roc_auc')
         sfs.fit(X_train, y_train)
 
     # refit the model using only the selected features
@@ -29,7 +30,7 @@ def train_eval_model(model, X_train, y_train, X_test, y_test,
     # get feature and importances
     if feature_importance:
         result = permutation_importance(
-            model, X_test, y_test, n_repeats=4, random_state=42, n_jobs=-1,
+            model, X_test, y_test, n_repeats=4, random_state=42, n_jobs=NJOBS,
             scoring='roc_auc'
         )
         sorted_importances_idx = result.importances_mean.argsort()
