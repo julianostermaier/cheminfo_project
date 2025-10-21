@@ -96,3 +96,39 @@ def plot_repeated_model_results(idx, axes, model_name, tpr_list, fpr_list, perfo
     axes[idx, 1].set_xlabel('Features')
 
     return axes
+
+def plot_single_model_results(idx, axes, model_name, tpr, fpr, performance_dict, importances):
+    """
+    Plot ROC curve, confusion matrix and print performance metrics.
+
+        Parameters:
+            idx: index of the model (for subplotting)
+            axes: matplotlib axes array
+            model_name: name of the model
+            tpr: true positive rate
+            fpr: false positive rate
+            performance_dict: dictionary with precision, recall, f1-score, auc, confusion_matrix
+    """
+
+    # plot ROC curve
+    axes[0].plot(fpr, tpr, label=f'{model_name} (AUC = {performance_dict["auc"]:.2f})')
+    axes[0].plot([0, 1], [0, 1], 'k--')
+    axes[0].set_xlabel('False Positive Rate')
+    axes[0].set_ylabel('True Positive Rate')
+    axes[0].set_title(f'ROC Curve - {model_name}')
+    axes[0].legend(loc='lower right')
+
+    # plot confusion matrix
+    axes[1].imshow(performance_dict['confusion_matrix'], cmap='Blues')
+    axes[1].set_xticks([0, 1])
+    axes[1].set_yticks([0, 1])
+    axes[1].set_xticklabels(['Predicted 0', 'Predicted 1'])
+    axes[1].set_yticklabels(['Actual 0', 'Actual 1'])
+    axes[1].set_title(f'Confusion Matrix - {model_name}: Prec / Rec / F1: {performance_dict["precision"]:.2f} / {performance_dict["recall"]:.2f} / {performance_dict["f1-score"]:.2f}')
+        # Add text annotations to confusion matrix
+    for i in range(2):
+        for j in range(2):
+            axes[1].text(j, i, performance_dict['confusion_matrix'][i, j], 
+                             ha='center', va='center', color='white' if performance_dict['confusion_matrix'][i, j] > performance_dict['confusion_matrix'].max()/2 else 'black')
+
+    return axes
