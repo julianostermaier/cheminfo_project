@@ -115,9 +115,6 @@ def PDBpreprocessing(
 
     df = data.copy()
 
-    # Use exact expected column names from the dataset header.
-    # This function is strict: it expects the input DataFrame to have the columns
-    # exactly as in your example: 'smiles' and 'kd/ki'. If they are missing, raise.
     smiles_col = 'smiles'
     binding_col = 'kd/ki'
     seq_col = 'seq'
@@ -126,112 +123,91 @@ def PDBpreprocessing(
         raise KeyError('Expected a column named "smiles" in the input DataFrame.')
     if binding_col not in df.columns:
         raise KeyError('Expected a column named "kd/ki" in the input DataFrame.')
-    # seq is optional unless requested
     if keep_protein_chain and seq_col not in df.columns:
         raise KeyError('keep_protein_chain=True but expected a column named "seq" in the input DataFrame.')
 
-    # filter by category if requested
-    if category is not None:
-        if 'header' in df.columns:
-            df = df[df['header'].str.contains(category, case=False, na=False)].copy()
-        else:
-            # if no header column, do not filter but warn (silently continue)
-            pass
+    # ---- Filter by category if present ----
+    if category is not None and 'header' in df.columns:
+        df = df[df['header'].str.contains(category, case=False, na=False)].copy()
 
-    # prepare variable list
+    # ---- Prepare variables ----
     if isinstance(variable, str):
-        if variable.lower() == 'both':
-            variables = ['Kd', 'Ki']
-        else:
-            variables = [variable]
+        variables = ['Kd', 'Ki'] if variable.lower() == 'both' else [variable]
     else:
         variables = list(variable)
 
-    # Extract and standardize each requested variable
-    # helper: detect which label (Kd or Ki) is present in the binding text
     def _detect_label(raw_text: str) -> Optional[str]:
         if not isinstance(raw_text, str):
             return None
         m = re.search(r'(?i)\b(Kd|Ki)\b', raw_text)
-        if m:
-            return m.group(1)
-        return None
+        return m.group(1) if m else None
+
     for var in variables:
         column_name = f'{var}_nM'
 
         def _extract_row_value(row: pd.Series):
-            raw_text = str(row[binding_col]) if binding_col in row.index else ''
+            raw_text = str(row.get(binding_col, ''))
             label = _detect_label(raw_text)
-            # if a single variable requested, require the label to match exactly (case-insensitive)
-            if len(variables) == 1:
-                if label is None or label.lower() != var.lower():
-                    return None
+            if len(variables) == 1 and (label is None or label.lower() != var.lower()):
+                return None
 
-            # Prefer numeric 'value' column if available in the provided dataset (interpreted as pKd/pKi)
-            # Only use it when the binding label in the text matches the requested variable (for single-variable calls).
-            if 'value' in row.index and pd.notna(row['value']):
+            if 'value' in row and pd.notna(row['value']):
                 try:
-                    # If single variable requested, ensure the label matches
-                    if len(variables) == 1 and label is not None and label.lower() != var.lower():
-                        # label mismatch -> don't use this row for this variable
+                    if len(variables) == 1 and label and label.lower() != var.lower():
                         return None
                     pv = float(row['value'])
-                    # value is pKd/pKi = -log10(Kd_M)
                     kd_m = 10.0 ** (-pv)
                     kd_nM = kd_m * 1e9
                     return float(kd_nM)
                 except Exception:
                     pass
 
-            # otherwise parse the 'kd/ki' text (e.g. 'Kd=0.006uM')
-            # when only one variable requested, do NOT allow a generic numeric-with-unit fallback
             allow_fallback = not (len(variables) == 1)
-            parsed = _extract_value_and_unit(raw_text, var, allow_fallback=allow_fallback)
+            parsed = _extract_value_and_unit(raw_text, var, allow_fallback)
             if parsed is None:
                 return None
             val_str, unit_str = parsed
-            return _standardize_to_nM(val_str, unit_str, assume_unit=assume_unit)
+            return _standardize_to_nM(val_str, unit_str, assume_unit)
 
         df[column_name] = df.apply(_extract_row_value, axis=1)
 
-    # drop rows missing SMILES or missing all requested variables
+    # ---- Drop rows missing key fields ----
     required_cols = [f'{v}_nM' for v in variables]
     df = df[df[smiles_col].notna()].copy()
-    # keep rows where all required columns (for single variable) or at least one (for both) are present
+
     if len(required_cols) == 1:
         df = df[df[required_cols[0]].notna()].copy()
     else:
         df = df[df[required_cols].notna().any(axis=1)].copy()
 
-    # create target(s) as natural log of nM values
-    target_cols: List[str] = []
+    # ---- Create target ----
     if len(variables) == 1:
         col = required_cols[0]
-        if log_transform:
-            df = df[df[col] > 0].copy()
-            df['target'] = df[col].apply(lambda x: math.log(x))
-        else:
-            df['target'] = df[col]
+        df = df[df[col] > 0].copy()
+        df['target'] = df[col].apply(lambda x: math.log(x)) if log_transform else df[col]
         target_cols = ['target']
     else:
-        # create separate named targets for each variable
+        target_cols = []
         for v, col in zip(variables, required_cols):
-            tgt = 'target'
-            if log_transform:
-                df = df[df[col].notna() & (df[col] > 0)].copy()
-                df[tgt] = df[col].apply(lambda x: math.log(x))
-            else:
-                df[tgt] = df[col]
-        target_cols.append(tgt)
+            tgt = f'{v}_target'
+            df = df[df[col].notna() & (df[col] > 0)].copy()
+            df[tgt] = df[col].apply(lambda x: math.log(x)) if log_transform else df[col]
+            target_cols.append(tgt)
 
-    # prepare output columns: only keep smiles, the target(s), and seq if requested
-    out_cols: List[str] = [smiles_col] + target_cols
+    # ---- Select output columns ----
+    out_cols = [smiles_col] + target_cols
     if keep_protein_chain:
         out_cols.append(seq_col)
+    df = df.loc[:, out_cols].reset_index(drop=True)
 
-    # final reduced DataFrame
-    return df.loc[:, out_cols].reset_index(drop=True)
+    # ---- Final cleanup: drop any remaining None / NaN ----
+    # This ensures no missing values in the final dataset
+    df = df.dropna(subset=out_cols).reset_index(drop=True)
 
+    print(f"✅ Cleaned dataset shape: {df.shape}")
+    print(f"   Dropped rows with None/NaN in {out_cols}")
+
+    return df
 
 if __name__ == '__main__':
     # quick smoke test when running the module directly
