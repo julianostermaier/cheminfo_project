@@ -180,19 +180,10 @@ def PDBpreprocessing(
     else:
         df = df[df[required_cols].notna().any(axis=1)].copy()
 
-    # ---- Create target ----
-    if len(variables) == 1:
-        col = required_cols[0]
-        df = df[df[col] > 0].copy()
-        df['target'] = df[col].apply(lambda x: math.log(x)) if log_transform else df[col]
-        target_cols = ['target']
-    else:
-        target_cols = []
-        for v, col in zip(variables, required_cols):
-            tgt = f'{v}_target'
-            df = df[df[col].notna() & (df[col] > 0)].copy()
-            df[tgt] = df[col].apply(lambda x: math.log(x)) if log_transform else df[col]
-            target_cols.append(tgt)
+    col = required_cols[0]
+    df = df[df[col] > 0].copy()
+    df['target'] = df[col].apply(lambda x: math.log(x)) if log_transform else df[col]
+    target_cols = ['target']
 
     # ---- Select output columns ----
     out_cols = [smiles_col] + target_cols
